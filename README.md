@@ -9,37 +9,37 @@ I have modified  the  ~/drivers/md/dm-dust.c  file present in the  linux kernel 
 STEPS TO TEST THE ADDED FUNCTIONALITY
 -------------------------------------
 
-Create a say 128MB file for your storage
+**Create, lets say a 128MB file for your storage**
 
 dd if=/dev/zero of=/tmp/myfile bs=1M count=128 # 128MB file
 
 
 
-Attach the file with a block device. loop16 here, behaves as a block device.
+**Attach the file with a block device. loop16 here, behaves as a block device.**
 
 losetup /dev/loop16 /tmp/myfile
 
 
 
-Load the dm-dust.ko module
+**Load the dm-dust.ko module**
 
 insmod ~/dm-dust.ko
 
 
 
-Get the size of your block storage
+**Get the size of your block storage**
 
 blockdev --blksz /dev/loop16
 
 
 
-Create the device dust1: 512 here is the block size. You can check dust1 device created in /dev/mapper
+**Create the device dust1: 512 here is the block size. You can check dust1 device created in /dev/mapper**
 
 dmsetup create dust1 --table '0 2621440 dust /dev/loop16 0 512'
 
 
 
-Check the status of the device dust1 that you have created. Initially, defaults will be set.
+**Check the status of the device dust1 that you have created. Initially, defaults will be set.**
 
 dmsetup status dust1
 
@@ -49,7 +49,7 @@ dmsetup status dust1
 
 
 
-Add bad blocks to fail write. Add blocks 61,65,67,72,87
+**Add bad blocks to fail write. Add blocks 61,65,67,72,87**
 
 dmsetup message dust1 0 addbadblock write 61
 
@@ -63,19 +63,19 @@ dmsetup message dust1 0 addbadblock write 87
 
 
 
-Check the blocks that you have added to fail write
+**Check the blocks that you have added to fail write**
 
 dmsetup message dust1 0 countbadblocks write
 
 
 
-Enable to fail write on the added blocks
+**Enable to fail write on the added blocks**
 
 dmsetup message dust1 0 enable write
 
 
 
-Check the status now after enabling write to fail on the added blocks.
+**Check the status now after enabling write to fail on the added blocks.**
 
 dmsetup status dust1
 
@@ -85,7 +85,7 @@ dmsetup status dust1
 
 
 
-Now try to write to your disk,  You should get write error if the write goes to the added blocks.
+**Now try to write to your disk,  You should get write error if the write goes to the added blocks.**
 
 dd if=/dev/zero of=/dev/mapper/dust1 bs=512 count=128 oflag=direct
 
