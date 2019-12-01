@@ -176,7 +176,7 @@ static int dust_add_block(struct dust_device *dd, unsigned long long block,
 	if(mode == RD)
 		dd->badblock_count_read++;
 	else
-		dd->badblock_count_read++;
+		dd->badblock_count_write++;
 
 	if (!dd->quiet_mode) {
 		DMINFO("%s: badblock added at block %llu with write fail count %hhu",
