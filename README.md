@@ -9,6 +9,21 @@ I have modified  the  ~/drivers/md/dm-dust.c  file present in the  linux kernel 
 STEPS TO TEST THE ADDED FUNCTIONALITY
 -------------------------------------
 
+
+**How to Fetch the code and build. Please use latest linux kernel 5.4.1** 
+git clone https://github.com/soumendus/modified-kernel-code.git
+cd modified-kernel-code/
+make
+
+This will build the dm-dust.ko driver. 
+
+
+
+
+
+
+
+
 **Create, lets say a 128MB file for your storage**
 
 dd if=/dev/zero of=/tmp/myfile bs=1M count=128 # 128MB file
@@ -118,6 +133,11 @@ dmsetup status dust1
 **Now try to write to your disk,  You should get write error if the write goes to the added blocks.**
 
 dd if=/dev/zero of=/dev/mapper/dust1 bs=512 count=128 oflag=direct
+
+
+
+
+
 
 
 
