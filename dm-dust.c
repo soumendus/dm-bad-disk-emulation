@@ -10,9 +10,8 @@
  * 
  *
  *
- * Name: Soumendu Sekhar Satapathy 
- * Email: satapathy.soumendu@gmail.com
- * Date Modified: 30th Nov 2019
+ * Soumendu Sekhar Satapathy email satapathy.soumendu@gmail.com
+ * 30th Nov 2019
  * I  have modified  the  ~/drivers/md/dm-dust.c  file present in the 
  * linux kernel stable ver 5.4.1 (version as of writing this comment) 
  * and have added functionality for emulating disk with "write errors" 
