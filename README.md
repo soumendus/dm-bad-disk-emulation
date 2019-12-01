@@ -14,9 +14,11 @@ Create a say 128MB file for your storage
 dd if=/dev/zero of=/tmp/myfile bs=1M count=128 # 128MB file
 
 
+
 Attach the file with a block device. loop16 here, behaves as a block device.
 
 losetup /dev/loop16 /tmp/myfile
+
 
 
 Load the dm-dust.ko module
@@ -24,14 +26,17 @@ Load the dm-dust.ko module
 insmod ~/dm-dust.ko
 
 
+
 Get the size of your block storage
 
 blockdev --blksz /dev/loop16
 
 
+
 Create the device dust1: 512 here is the block size. You can check dust1 device created in /dev/mapper
 
 dmsetup create dust1 --table '0 2621440 dust /dev/loop16 0 512'
+
 
 
 Check the status of the device dust1 that you have created. Initially, defaults will be set.
@@ -41,6 +46,7 @@ dmsetup status dust1
 0 2621440 dust 7:16 bypass verbose
 
 7:16 bypass verbose
+
 
 
 Add bad blocks to fail write. Add blocks 61,65,67,72,87
@@ -56,14 +62,17 @@ dmsetup message dust1 0 addbadblock write 72
 dmsetup message dust1 0 addbadblock write 87
 
 
+
 Check the blocks that you have added to fail write
 
 dmsetup message dust1 0 countbadblocks write
 
 
+
 Enable to fail write on the added blocks
 
 dmsetup message dust1 0 enable write
+
 
 
 Check the status now after enabling write to fail on the added blocks.
@@ -73,6 +82,7 @@ dmsetup status dust1
 0 2621440 dust 7:16 bypass verbose
 
 7:16 fail_write_on_bad_block verbose
+
 
 
 Now try to write to your disk,  You should get write error if the write goes to the added blocks.
