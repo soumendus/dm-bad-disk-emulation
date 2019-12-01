@@ -1,4 +1,4 @@
-Author: Soumendu Sekhar Satapathy
+Soumendu Sekhar Satapathy
 Email: satapathy.soumendu@gmail.com
 
 # modified-kernel-code
