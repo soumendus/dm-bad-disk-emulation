@@ -38,12 +38,16 @@ dmsetup status dust1
 0 2621440 dust 7:16 bypass verbose
 7:16 bypass verbose
 
-Add bad blocks to fail write
+Add bad blocks to fail write. Add blocks 61,65,67,72,87
 
 dmsetup message dust1 0 addbadblock write 61
+
 dmsetup message dust1 0 addbadblock write 65
+
 dmsetup message dust1 0 addbadblock write 67
+
 dmsetup message dust1 0 addbadblock write 72
+
 dmsetup message dust1 0 addbadblock write 87
 
 Check the blocks that you have added to fail write
