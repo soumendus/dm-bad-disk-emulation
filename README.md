@@ -4,10 +4,7 @@ Email: satapathy.soumendu@gmail.com
 # modified-kernel-code
 Modified ~/drivers/md/dm-dust.c file pressent in linux kernel version 5.4.1 to add write disk error emulation
 
-I have modified  the  ~/drivers/md/dm-dust.c  file present in the  linux kernel stable ver 5.4.1 
-(version as of writing this comment) and have added functionality for emulating disk with "write errors" also.  
-I needed "write error"  functionality  for my  test  suite, so I have added  this  functionality to  the existing 
-code. However the code that I have written needs some re-factoring and cleanups but it works for me.
+I have modified  the  ~/drivers/md/dm-dust.c  file present in the  linux kernel stable ver 5.4.1 (version as of writing this comment) and have added functionality for emulating disk with "write errors" also.  I needed "write error"  functionality  for my  test  suite, so I have added  this  functionality to  the existing code. However the code that I have written needs some re factoring and cleanups but it works for me.
 
 STEPS TO TEST THE ADDED FUNCTIONALITY
 -------------------------------------
