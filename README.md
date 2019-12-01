@@ -39,6 +39,7 @@ Check the status of the device dust1 that you have created. Initially, defaults 
 dmsetup status dust1
 
 0 2621440 dust 7:16 bypass verbose
+
 7:16 bypass verbose
 
 
@@ -70,6 +71,7 @@ Check the status now after enabling write to fail on the added blocks.
 dmsetup status dust1
 
 0 2621440 dust 7:16 bypass verbose
+
 7:16 fail_write_on_bad_block verbose
 
 
