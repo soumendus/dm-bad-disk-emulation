@@ -1,0 +1,1 @@
+cmd_/root/modified-kernel-code/dm-dust.ko := ld -r -m elf_x86_64  -z max-page-size=0x200000 -T ./scripts/module-common.lds --build-id  -o /root/modified-kernel-code/dm-dust.ko /root/modified-kernel-code/dm-dust.o /root/modified-kernel-code/dm-dust.mod.o ;  true

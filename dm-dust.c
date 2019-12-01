@@ -16,9 +16,11 @@
  * linux kernel stable ver 5.4.1 (version as of writing this comment) 
  * and have added functionality for emulating disk with "write errors" 
  * also.  I  needed "write error"  functionality  for my  test  suite, 
- * so I have added  this  functionality to  the existing code. However 
- * the code that I have written needs some re-factoring and cleanups
- * but it works for me.
+ * so I have added  this  functionality to  the existing code.  
+ *
+ * Soumendu Sekhar Satapathy email satapathy.soumendu@gmail.com
+ * 01 Dec 2019
+ * Did some code cleanups
  *
  */
 
@@ -28,13 +30,10 @@
 
 #define DM_MSG_PREFIX "dust"
 
-struct badblock_read {
-	struct rb_node node;
-	sector_t bb;
-	unsigned char wr_fail_cnt;
-};
+#define RD false
+#define WR true
 
-struct badblock_write {
+struct badblock {
 	struct rb_node node;
 	sector_t bb;
 	unsigned char wr_fail_cnt;
@@ -53,17 +52,15 @@ struct dust_device {
 	sector_t start;
 	bool fail_write_on_bb:1;
 	bool fail_read_on_bb:1;
-	bool bad_read_bb_list_clear;
-	bool bad_write_bb_list_clear;
 	bool quiet_mode:1;
 };
 
-static struct badblock_read *dust_rb_search_read(struct rb_root *root, sector_t blk)
+static struct badblock *dust_rb_search(struct rb_root *root, sector_t blk)
 {
 	struct rb_node *node = root->rb_node;
 
 	while (node) {
-		struct badblock_read *bblk = rb_entry(node, struct badblock_read, node);
+		struct badblock *bblk = rb_entry(node, struct badblock, node);
 
 		if (bblk->bb > blk)
 			node = node->rb_left;
@@ -76,33 +73,16 @@ static struct badblock_read *dust_rb_search_read(struct rb_root *root, sector_t 
 	return NULL;
 }
 
-static struct badblock_write *dust_rb_search_write(struct rb_root *root, sector_t blk)
+
+static bool dust_rb_insert(struct rb_root *root, struct badblock *new)
 {
-	struct rb_node *node = root->rb_node;
-
-	while (node) {
-		struct badblock_write *bblk = rb_entry(node, struct badblock_write, node);
-
-		if (bblk->bb > blk)
-			node = node->rb_left;
-		else if (bblk->bb < blk)
-			node = node->rb_right;
-		else
-			return bblk;
-	}
-
-	return NULL;
-}
-
-static bool dust_rb_insert_read(struct rb_root *root, struct badblock_read *new)
-{
-	struct badblock_read *bblk;
+	struct badblock *bblk;
 	struct rb_node **link = &root->rb_node, *parent = NULL;
 	sector_t value = new->bb;
 
 	while (*link) {
 		parent = *link;
-		bblk = rb_entry(parent, struct badblock_read, node);
+		bblk = rb_entry(parent, struct badblock, node);
 
 		if (bblk->bb > value)
 			link = &(*link)->rb_left;
@@ -118,37 +98,16 @@ static bool dust_rb_insert_read(struct rb_root *root, struct badblock_read *new)
 	return true;
 }
 
-static bool dust_rb_insert_write(struct rb_root *root, struct badblock_write *new)
+static int dust_remove_block(struct dust_device *dd, unsigned long long block, bool mode)
 {
-	struct badblock_write *bblk;
-	struct rb_node **link = &root->rb_node, *parent = NULL;
-	sector_t value = new->bb;
-
-	while (*link) {
-		parent = *link;
-		bblk = rb_entry(parent, struct badblock_write, node);
-
-		if (bblk->bb > value)
-			link = &(*link)->rb_left;
-		else if (bblk->bb < value)
-			link = &(*link)->rb_right;
-		else
-			return false;
-	}
-
-	rb_link_node(&new->node, parent, link);
-	rb_insert_color(&new->node, root);
-
-	return true;
-}
-
-static int dust_remove_block_read(struct dust_device *dd, unsigned long long block)
-{
-	struct badblock_read *bblock;
+	struct badblock *bblock;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dd->dust_lock, flags);
-	bblock = dust_rb_search_read(&dd->badblocklist_read, block);
+	if(mode == RD)
+		bblock = dust_rb_search(&dd->badblocklist_read, block);
+	else
+		bblock = dust_rb_search(&dd->badblocklist_write, block);
 
 	if (bblock == NULL) {
 		if (!dd->quiet_mode) {
@@ -159,138 +118,86 @@ static int dust_remove_block_read(struct dust_device *dd, unsigned long long blo
 		return -EINVAL;
 	}
 
-	rb_erase(&bblock->node, &dd->badblocklist_read);
-	dd->badblock_count_read--;
-	if (!dd->quiet_mode)
-		DMINFO("%s: badblock removed at block %llu", __func__, block);
-	kfree(bblock);
-	spin_unlock_irqrestore(&dd->dust_lock, flags);
-
-	return 0;
-}
-
-static int dust_remove_block_write(struct dust_device *dd, unsigned long long block)
-{
-	struct badblock_write *bblock;
-	unsigned long flags;
-
-	spin_lock_irqsave(&dd->dust_lock, flags);
-	bblock = dust_rb_search_write(&dd->badblocklist_write, block);
-
-	if (bblock == NULL) {
-		if (!dd->quiet_mode) {
-			DMERR("%s: block %llu not found in badblocklist_write",
-			      __func__, block);
-		}
-		spin_unlock_irqrestore(&dd->dust_lock, flags);
-		return -EINVAL;
-	}
-
-	rb_erase(&bblock->node, &dd->badblocklist_read);
-	dd->badblock_count_write--;
-	if (!dd->quiet_mode)
-		DMINFO("%s: badblock removed at block %llu", __func__, block);
-	kfree(bblock);
-	spin_unlock_irqrestore(&dd->dust_lock, flags);
-
-	return 0;
-}
-
-static int dust_add_block_read(struct dust_device *dd, unsigned long long block,
-			  unsigned char wr_fail_cnt)
-{
-	struct badblock_read *bblock;
-	unsigned long flags;
-
-	bblock = kmalloc(sizeof(*bblock), GFP_KERNEL);
-	if (bblock == NULL) {
-		if (!dd->quiet_mode)
-			DMERR("%s: badblock allocation failed", __func__);
-		return -ENOMEM;
-	}
-
-	spin_lock_irqsave(&dd->dust_lock, flags);
-	bblock->bb = block;
-	bblock->wr_fail_cnt = wr_fail_cnt;
-	if (!dust_rb_insert_read(&dd->badblocklist_read, bblock)) {
-		if (!dd->quiet_mode) {
-			DMERR("%s: block %llu already in badblocklist",
-			      __func__, block);
-		}
-		spin_unlock_irqrestore(&dd->dust_lock, flags);
-		kfree(bblock);
-		return -EINVAL;
-	}
-
-	dd->badblock_count_read++;
-	if (!dd->quiet_mode) {
-		DMINFO("%s: badblock added at block %llu with write fail count %hhu",
-		       __func__, block, wr_fail_cnt);
-	}
-	spin_unlock_irqrestore(&dd->dust_lock, flags);
-
-	return 0;
-}
-
-static int dust_add_block_write(struct dust_device *dd, unsigned long long block,
-			  unsigned char wr_fail_cnt)
-{
-	struct badblock_write *bblock;
-	unsigned long flags;
-
-	bblock = kmalloc(sizeof(*bblock), GFP_KERNEL);
-	if (bblock == NULL) {
-		if (!dd->quiet_mode)
-			DMERR("%s: badblock allocation failed", __func__);
-		return -ENOMEM;
-	}
-
-	spin_lock_irqsave(&dd->dust_lock, flags);
-	bblock->bb = block;
-	bblock->wr_fail_cnt = wr_fail_cnt;
-	if (!dust_rb_insert_write(&dd->badblocklist_write, bblock)) {
-		if (!dd->quiet_mode) {
-			DMERR("%s: block %llu already in badblocklist",
-			      __func__, block);
-		}
-		spin_unlock_irqrestore(&dd->dust_lock, flags);
-		kfree(bblock);
-		return -EINVAL;
-	}
-
-	dd->badblock_count_write++;
-	if (!dd->quiet_mode) {
-		DMINFO("%s: badblock added at block %llu with write fail count %hhu",
-		       __func__, block, wr_fail_cnt);
-	}
-	spin_unlock_irqrestore(&dd->dust_lock, flags);
-
-	return 0;
-}
-
-static int dust_query_block_read(struct dust_device *dd, unsigned long long block)
-{
-	struct badblock_read *bblock;
-	unsigned long flags;
-
-	spin_lock_irqsave(&dd->dust_lock, flags);
-	bblock = dust_rb_search_read(&dd->badblocklist_read, block);
-	if (bblock != NULL)
-		DMINFO("%s: block %llu found in badblocklist", __func__, block);
+	if(mode == RD)
+		rb_erase(&bblock->node, &dd->badblocklist_read);
 	else
-		DMINFO("%s: block %llu not found in badblocklist", __func__, block);
+		rb_erase(&bblock->node, &dd->badblocklist_write);
+	if(mode == RD)
+		dd->badblock_count_read--;
+	else
+		dd->badblock_count_write--;
+	if (!dd->quiet_mode)
+		DMINFO("%s: badblock removed at block %llu", __func__, block);
+	kfree(bblock);
 	spin_unlock_irqrestore(&dd->dust_lock, flags);
 
 	return 0;
 }
 
-static int dust_query_block_write(struct dust_device *dd, unsigned long long block)
+static int dust_add_block(struct dust_device *dd, unsigned long long block,
+			  unsigned char wr_fail_cnt, bool mode)
 {
-	struct badblock_write *bblock;
+	struct badblock *bblock;
+	unsigned long flags;
+
+	bblock = kmalloc(sizeof(*bblock), GFP_KERNEL);
+	if (bblock == NULL) {
+		if (!dd->quiet_mode)
+			DMERR("%s: badblock allocation failed", __func__);
+		return -ENOMEM;
+	}
+
+	spin_lock_irqsave(&dd->dust_lock, flags);
+	bblock->bb = block;
+	bblock->wr_fail_cnt = wr_fail_cnt;
+	if(mode == RD) {
+		if (!dust_rb_insert(&dd->badblocklist_read, bblock)) {
+			if (!dd->quiet_mode) {
+				DMERR("%s: block %llu already in badblocklist",
+			      		__func__, block);
+			}
+			spin_unlock_irqrestore(&dd->dust_lock, flags);
+			kfree(bblock);
+			return -EINVAL;
+		}
+	}
+	else {
+		if (!dust_rb_insert(&dd->badblocklist_write, bblock)) {
+			if (!dd->quiet_mode) {
+				DMERR("%s: block %llu already in badblocklist",
+			      		__func__, block);
+			}
+			spin_unlock_irqrestore(&dd->dust_lock, flags);
+			kfree(bblock);
+			return -EINVAL;
+		}
+	}
+
+	if(mode == RD)
+		dd->badblock_count_read++;
+	else
+		dd->badblock_count_read++;
+
+	if (!dd->quiet_mode) {
+		DMINFO("%s: badblock added at block %llu with write fail count %hhu",
+		       __func__, block, wr_fail_cnt);
+	}
+	spin_unlock_irqrestore(&dd->dust_lock, flags);
+
+	return 0;
+}
+
+
+static int dust_query_block(struct dust_device *dd, unsigned long long block, bool mode)
+{
+	struct badblock *bblock;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dd->dust_lock, flags);
-	bblock = dust_rb_search_write(&dd->badblocklist_write, block);
+	if(mode == RD)
+		bblock = dust_rb_search(&dd->badblocklist_read, block);
+	else
+		bblock = dust_rb_search(&dd->badblocklist_write, block);
 	if (bblock != NULL)
 		DMINFO("%s: block %llu found in badblocklist", __func__, block);
 	else
@@ -302,7 +209,7 @@ static int dust_query_block_write(struct dust_device *dd, unsigned long long blo
 
 static int __dust_map_read(struct dust_device *dd, sector_t thisblock)
 {
-	struct badblock_read *bblk = dust_rb_search_read(&dd->badblocklist_read, thisblock);
+	struct badblock *bblk = dust_rb_search(&dd->badblocklist_read, thisblock);
 
 	if (bblk)
 		return DM_MAPIO_KILL;
@@ -328,8 +235,8 @@ static int dust_map_read(struct dust_device *dd, sector_t thisblock,
 
 static int __dust_map_write(struct dust_device *dd, sector_t thisblock)
 {
-	struct badblock_read *bblk_r = dust_rb_search_read(&dd->badblocklist_read, thisblock);
-	struct badblock_write *bblk_w = dust_rb_search_write(&dd->badblocklist_write, thisblock);
+	struct badblock *bblk_r = dust_rb_search(&dd->badblocklist_read, thisblock);
+	struct badblock *bblk_w = dust_rb_search(&dd->badblocklist_write, thisblock);
 
 	if(dd->fail_write_on_bb) {
 		if (bblk_w) 
@@ -419,44 +326,41 @@ static bool __dust_clear_badblocks(struct rb_root *tree,
 	return true;
 }
 
-static int dust_clear_badblocks_read(struct dust_device *dd)
+static int dust_clear_badblocks(struct dust_device *dd, bool mode)
 {
 	unsigned long flags;
 	struct rb_root badblocklist_read;
-	unsigned long long badblock_count_read;
-
-	spin_lock_irqsave(&dd->dust_lock, flags);
-	badblocklist_read = dd->badblocklist_read;
-	badblock_count_read = dd->badblock_count_read;
-	dd->badblocklist_read = RB_ROOT;
-	dd->badblock_count_read = 0;
-	spin_unlock_irqrestore(&dd->dust_lock, flags);
-
-	if (!__dust_clear_badblocks(&badblocklist_read, badblock_count_read))
-		DMINFO("%s: no badblocks found", __func__);
-	else
-		DMINFO("%s: badblocks cleared", __func__);
-
-	return 0;
-}
-
-static int dust_clear_badblocks_write(struct dust_device *dd)
-{
-	unsigned long flags;
 	struct rb_root badblocklist_write;
+	unsigned long long badblock_count_read;
 	unsigned long long badblock_count_write;
 
 	spin_lock_irqsave(&dd->dust_lock, flags);
-	badblocklist_write = dd->badblocklist_write;
-	badblock_count_write = dd->badblock_count_write;
-	dd->badblocklist_write = RB_ROOT;
-	dd->badblock_count_write = 0;
+	if(mode == RD) {
+		badblocklist_read = dd->badblocklist_read;
+		badblock_count_read = dd->badblock_count_read;
+		dd->badblocklist_read = RB_ROOT;
+		dd->badblock_count_read = 0;
+	}
+	else {
+		badblocklist_write = dd->badblocklist_write;
+		badblock_count_write = dd->badblock_count_write;
+		dd->badblocklist_write = RB_ROOT;
+		dd->badblock_count_write = 0;
+	}
 	spin_unlock_irqrestore(&dd->dust_lock, flags);
 
-	if (!__dust_clear_badblocks(&badblocklist_write, badblock_count_write))
-		DMINFO("%s: no badblocks found", __func__);
-	else
-		DMINFO("%s: badblocks cleared", __func__);
+	if(mode == RD) {
+		if (!__dust_clear_badblocks(&badblocklist_read, badblock_count_read))
+			DMINFO("%s: no read badblocks found", __func__);
+		else
+			DMINFO("%s: read badblocks cleared", __func__);
+	}
+	else {
+		if (!__dust_clear_badblocks(&badblocklist_write, badblock_count_write))
+			DMINFO("%s: no write badblocks found", __func__);
+		else
+			DMINFO("%s: write badblocks cleared", __func__);
+	}
 
 	return 0;
 }
@@ -541,9 +445,6 @@ static int dust_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	 * Defaults to false; enabled later by message.
 	 */
 	dd->fail_write_on_bb = false;
-
-	dd->bad_read_bb_list_clear = false;
-	dd->bad_write_bb_list_clear = false;
 
 	/*
 	 * Initialize bad block list rbtree.
@@ -669,11 +570,11 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 		}
 		else if (!strcasecmp(argv[0], "clearbadblocks")) {
 			if (!strcasecmp(argv[1], "read")) {
-				r = dust_clear_badblocks_read(dd);
+				r = dust_clear_badblocks(dd,false);
 				invalid_msg = false;
 			}
 			else if (!strcasecmp(argv[1], "write")) {
-				r = dust_clear_badblocks_write(dd);
+				r = dust_clear_badblocks(dd,true);
 				invalid_msg = false;
 			}
 			else
@@ -714,11 +615,11 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 
 		if (!strcasecmp(argv[0], "addbadblock")) {
 			if (!strcasecmp(argv[1], "read")) {
-				r = dust_add_block_read(dd, block, 0);
+				r = dust_add_block(dd, block, 0, false);
 				invalid_msg = false;
 			}
 			else if (!strcasecmp(argv[1], "write")) {
-				r = dust_add_block_write(dd, block, 0);
+				r = dust_add_block(dd, block, 0, true);
 				invalid_msg = false;
 			}
 			else
@@ -726,11 +627,11 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 		}
 		else if (!strcasecmp(argv[0], "removebadblock")) {
 			if (!strcasecmp(argv[1], "read")) {
-				r = dust_remove_block_read(dd, block);
+				r = dust_remove_block(dd, block, false);
 				invalid_msg = false;
 			}
 			else if (!strcasecmp(argv[1], "write")) {
-				r = dust_remove_block_write(dd, block);
+				r = dust_remove_block(dd, block, true);
 				invalid_msg = false;
 			}
 			else
@@ -738,11 +639,11 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 		}
 		else if (!strcasecmp(argv[0], "queryblock")) {
 			if (!strcasecmp(argv[1], "read")) {
-				r = dust_query_block_read(dd, block);
+				r = dust_query_block(dd, block, false);
 				invalid_msg = false;
 			}
 			else if (!strcasecmp(argv[1], "write")) {
-				r = dust_query_block_write(dd, block);
+				r = dust_query_block(dd, block, true);
 				invalid_msg = false;
 			}
 			else
@@ -771,11 +672,11 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 
                 if (!strcasecmp(argv[0], "addbadblock")) {
 			if (!strcasecmp(argv[1], "read")) {
-				r = dust_add_block_read(dd, block, wr_fail_cnt);
+				r = dust_add_block(dd, block, wr_fail_cnt, false);
 				invalid_msg = false;
 			}
 			else if (!strcasecmp(argv[1], "write")) {
-				r = dust_add_block_write(dd, block, wr_fail_cnt);
+				r = dust_add_block(dd, block, wr_fail_cnt, true);
 				invalid_msg = false;
 			}
 			else
