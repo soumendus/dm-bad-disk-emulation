@@ -18,7 +18,9 @@ STEPS TO TEST THE ADDED FUNCTIONALITY
 **How to Fetch the code and build. Please use latest linux kernel 5.4.1** 
 
 git clone https://github.com/soumendus/modified-kernel-code.git
+
 cd modified-kernel-code/
+
 make
 
 This will build the dm-dust.ko driver. 
