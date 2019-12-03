@@ -61,7 +61,7 @@ insmod ~/dm-dust.ko
 
 **Get the size of your block storage**
 
-blockdev --blksz /dev/loop16
+blockdev --getsz /dev/loop16
 
 
 
