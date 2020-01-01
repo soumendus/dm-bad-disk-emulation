@@ -19,7 +19,7 @@ STEPS TO TEST THE ADDED FUNCTIONALITY
 
 $ git clone https://github.com/soumendus/dm-bad-disk-emulation.git
 
-$ cd modified-kernel-code/
+$ cd dm-bad-disk-emulation
 
 $ make
 
